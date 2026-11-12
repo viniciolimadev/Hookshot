@@ -964,7 +964,7 @@ def compile_one(job):
         open(stamp, "w").write(key)
         return src, 0.0, None
     lease = GATE.enter(src) if GATE else None
-    t = time.time()
+    t = time.monotonic()
     try:
         with subprocess.Popen([cc] + fl + ["-c", src, "-o", obj], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as p:
             no_throttle(getattr(p, "_handle", None))
@@ -977,10 +977,10 @@ def compile_one(job):
     r = subprocess.CompletedProcess(p.args, p.returncode, out, err)
     if r.returncode:
         failure = r.stderr or r.stdout or "Compiler exited with status %d without diagnostics." % r.returncode
-        return src, time.time() - t, failure[-4000:]
+        return src, time.monotonic() - t, failure[-4000:]
     open(stamp, "w").write(key)
     cache_put(obj, key)
-    return src, time.time() - t, None
+    return src, time.monotonic() - t, None
 
 
 def main():
@@ -1288,7 +1288,7 @@ def main():
         print("@@eta %d" % eta_left(pending, eta_jobs), flush=True)
     print("%d files, %d jobs, %s" % (len(jobs), a.jobs, " ".join(f for f in fl if f.startswith("-D") or f.startswith("-O"))),
           flush=True)
-    t0, failed = time.time(), []
+    t0, failed = time.monotonic(), []
     with concurrent.futures.ThreadPoolExecutor(a.jobs) as ex:
         # (as each ends, not in order: the builder app shows progress from these lines, and the biggest file comes first)
         submitted = {ex.submit(compile_one, job): job for job in jobs}
@@ -1300,7 +1300,7 @@ def main():
                 print("not compiled yet: %s (%d MB, %.0fs), tried again alone at the end:\n%s"
                       % (os.path.basename(src), size, secs, err[-1500:]), flush=True)
             else:
-                print("  %-16s %4d MB  %6.0fs  (%.0fs)" % (os.path.basename(src), size, secs, time.time() - t0), flush=True)
+                print("  %-16s %4d MB  %6.0fs  (%.0fs)" % (os.path.basename(src), size, secs, time.monotonic() - t0), flush=True)
             if counted:
                 print("@@file %s %.1f %s" % (os.path.basename(src), secs,
                                              "failed" if err else "cached" if secs <= 0 else "new"), flush=True)
@@ -1317,13 +1317,13 @@ def main():
             still += 1
             print("FAILED %s (%d MB, %.0fs, alone too):\n%s" % (os.path.basename(src), size, secs, err), flush=True)
         else:
-            print("  %-16s %4d MB  %6.0fs  (%.0fs, alone)" % (os.path.basename(src), size, secs, time.time() - t0), flush=True)
+            print("  %-16s %4d MB  %6.0fs  (%.0fs, alone)" % (os.path.basename(src), size, secs, time.monotonic() - t0), flush=True)
         if counted:
             print("@@file %s %.1f %s" % (os.path.basename(src), secs, "failed" if err else "again"), flush=True)
             if not err and expected.get(src):
                 pending.remove(expected[src].pop())
                 print("@@eta %d" % eta_left(pending, eta_jobs), flush=True)
-    print("compiled in %.0fs, %d failed" % (time.time() - t0, still), flush=True)
+    print("compiled in %.0fs, %d failed" % (time.monotonic() - t0, still), flush=True)
     if still:
         return 1
     if a.standalone and not vk_only:
@@ -1334,7 +1334,7 @@ def main():
     open(rsp, "w", encoding="utf-8").write("\n".join('"%s"' % o.replace("\\", "/") for o in objs))
     if a.standalone and not vk_only and LINUX:
         exe = os.path.join(out, EXE)   # (+ hookshot.map: crash offsets -> f_<guest address>)
-        t = time.time()
+        t = time.monotonic()
         # (--export-dynamic-symbol: the window's state, which the Vulkan back end's own Win32 calls read by name)
         r = subprocess.run([cc] + target() + ["-fuse-ld=lld", "-o", exe] + linker("-Map=" + exe + ".map") +
                            ["-Wl,--gc-sections", "-Wl,--export-dynamic-symbol=hos_posix_*", "@" + rsp] + HOT_ORDER() +
@@ -1343,17 +1343,17 @@ def main():
                            capture_output=True, text=True)
         undefined = sorted({l.strip() for l in (r.stdout + r.stderr).splitlines() if "undefined symbol" in l})
         if r.returncode:
-            print("link FAILED (%.0fs), %d undefined symbols" % (time.time() - t, len(undefined)))
+            print("link FAILED (%.0fs), %d undefined symbols" % (time.monotonic() - t, len(undefined)))
             print("\n".join(undefined[:60]) if undefined else (r.stdout + r.stderr)[-3000:])
             return 1
-        print("linked %s: %d MB (%.0fs)" % (exe, os.path.getsize(exe) >> 20, time.time() - t))
+        print("linked %s: %d MB (%.0fs)" % (exe, os.path.getsize(exe) >> 20, time.monotonic() - t))
         sdl = os.environ.get("HOOKSHOT_SDL2", "")   # (libSDL2-2.0.so.0 beside it, when the AppImage brings one)
         if sdl and os.path.exists(sdl):
             import shutil
             shutil.copyfile(sdl, os.path.join(out, "libSDL2-2.0.so.0"))
     elif a.standalone and not vk_only:
         exe = os.path.join(out, "hookshot.exe")   # (+ hookshot.map: crash offsets -> f_<guest address>)
-        t = time.time()
+        t = time.monotonic()
         r = subprocess.run([cc] + toolchain.native_target() + toolchain.native_link() +
                            ["-o", exe] + linker("/map:" + exe[:-4] + ".map") + [toolchain.link_opt("/stack:8388608"), "@" + rsp] + HOT_ORDER() + HOST_LIBS +
                            ([toolchain.link_opt("/nodefaultlib:clang_rt.profile.lib")] if PGO == "gen" else []) +
@@ -1368,10 +1368,10 @@ def main():
                            capture_output=True, text=True)
         undefined = sorted({l.strip() for l in (r.stdout + r.stderr).splitlines() if "undefined symbol" in l})
         if r.returncode:
-            print("link FAILED (%.0fs), %d undefined symbols" % (time.time() - t, len(undefined)))
+            print("link FAILED (%.0fs), %d undefined symbols" % (time.monotonic() - t, len(undefined)))
             print("\n".join(undefined[:60]) if undefined else (r.stdout + r.stderr)[-3000:])
             return 1
-        print("linked %s: %d MB (%.0fs)" % (exe, os.path.getsize(exe) >> 20, time.time() - t))
+        print("linked %s: %d MB (%.0fs)" % (exe, os.path.getsize(exe) >> 20, time.monotonic() - t))
         if wgpu:   # (wgpu_native.dll beside it; in use while the game runs)
             import shutil
             dll, dst = os.path.join(WGPU, "lib", "wgpu_native.dll"), os.path.join(out, "wgpu_native.dll")
@@ -1403,7 +1403,7 @@ def main():
         vdll = os.path.join(out, VK_LIB)
         vrsp = os.path.join(out, "vk_objs.rsp")
         open(vrsp, "w", encoding="utf-8").write("\n".join('"%s"' % j[2].replace("\\", "/") for j in vk_jobs))
-        t = time.time()
+        t = time.monotonic()
         if LINUX:   # (its C++ runtime inside: the game folder runs where the AppImage's sysroot is older than the system)
             link = [toolchain.need(toolchain.find("clang++"))] + target() + ["-fuse-ld=lld", "-shared", "-o", vdll] + \
                 linker("-Map=" + vdll + ".map") + ["-Wl,-Bsymbolic", "-Wl,--gc-sections", "-static-libstdc++", "-static-libgcc", "@" + vrsp] + \
@@ -1419,19 +1419,19 @@ def main():
             return 1
         if LINUX and not check_vk_symbols(vdll):
             return 1
-        print("linked %s: %d MB (%.0fs)" % (vdll, os.path.getsize(vdll) >> 20, time.time() - t))
+        print("linked %s: %d MB (%.0fs)" % (vdll, os.path.getsize(vdll) >> 20, time.monotonic() - t))
     if a.dll:
         dll = os.path.join(out, "hookshot_game.dll")   # (+ hookshot_game.map: crash offsets -> f_<guest address>)
-        t = time.time()
+        t = time.monotonic()
         r = subprocess.run([cc] + toolchain.native_target() + toolchain.native_link() +
                            ["-shared", "-o", dll] + linker("/map:" + dll[:-4] + ".map") + ["@" + rsp],
                            capture_output=True, text=True)
         undefined = sorted({l.strip() for l in (r.stdout + r.stderr).splitlines() if "undefined symbol" in l})
         if r.returncode:
-            print("link FAILED (%.0fs), %d undefined symbols" % (time.time() - t, len(undefined)))
+            print("link FAILED (%.0fs), %d undefined symbols" % (time.monotonic() - t, len(undefined)))
             print("\n".join(undefined[:40]) if undefined else (r.stdout + r.stderr)[-3000:])
             return 1
-        print("linked %s: %d MB, no undefined symbols (%.0fs)" % (dll, os.path.getsize(dll) >> 20, time.time() - t))
+        print("linked %s: %d MB, no undefined symbols (%.0fs)" % (dll, os.path.getsize(dll) >> 20, time.monotonic() - t))
     return 0
 
 

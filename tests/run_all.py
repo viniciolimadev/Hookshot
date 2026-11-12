@@ -439,7 +439,7 @@ def main():
     rank = {name: i for i, name in enumerate(by_time([c.name for c in checks], times))}
 
     def one(c):
-        t = time.time()
+        t = time.monotonic()
         try:
             r = c.run()
             c.status = "pass" if r.returncode == 0 else "FAIL"
@@ -450,19 +450,19 @@ def main():
         except Exception as e:   # (a check that could not even start is a failure, not a crash of the runner)
             c.status = "FAIL"
             c.output = "%s: %s\n" % (type(e).__name__, e)
-        c.secs = time.time() - t
+        c.secs = time.monotonic() - t
         return c
 
     # (slowest first: see the docstring)
     to_run = sorted((c for c in checks if not c.why_skip), key=lambda c: rank[c.name])
-    t0 = time.time()
+    t0 = time.monotonic()
     print("%d checks, %d skipped, %d at once (%s%s)" % (len(to_run), len(checks) - len(to_run), a.jobs, OS, part),
           flush=True)
     with concurrent.futures.ThreadPoolExecutor(max(1, a.jobs)) as ex:
         for c in concurrent.futures.as_completed([ex.submit(one, c) for c in to_run]):
             c = c.result()
             print("%-7s %6.1fs  %s" % (c.status, c.secs, c.name), flush=True)
-    wall = time.time() - t0
+    wall = time.monotonic() - t0
 
     failed = [c for c in to_run if c.status != "pass"]
     gh = os.environ.get("GITHUB_ACTIONS") == "true"

@@ -80,7 +80,7 @@ class FailedCompileTests(unittest.TestCase):
         """make_game counts the link as reached on build.py's "compiled in Ns, 0 failed" alone: not with a file that failed"""
         src = (ROOT / "nx2" / "make_game.py").read_text(encoding="utf-8")
         build = (ROOT / "nx2" / "build.py").read_text(encoding="utf-8")
-        self.assertIn('print("compiled in %.0fs, %d failed" % (time.time() - t0, still), flush=True)', build)
+        self.assertIn('print("compiled in %.0fs, %d failed" % (time.monotonic() - t0, still), flush=True)', build)
         pattern = re.search(r're\.match\(r"(compiled in [^"]+)", line\)', src).group(1)
         self.assertTrue(re.match(pattern, "compiled in %.0fs, %d failed" % (790.4, 0)))
         self.assertFalse(re.match(pattern, "compiled in %.0fs, %d failed" % (790.4, 1)))
